@@ -427,13 +427,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('Could not migrate local progress:', migrationError);
       }
 
-      if (wasMigrated) {
-        try {
-          const localAccounts: Record<string, string> = JSON.parse(localStorage.getItem('kids_center_passwords') || '{}');
-          delete localAccounts[cleanEmail];
-          localStorage.setItem('kids_center_passwords', JSON.stringify(localAccounts));
-        } catch {}
-      }
+      // Remove this account's legacy plaintext password after Supabase authentication succeeds.
+      try {
+        const localAccounts: Record<string, string> = JSON.parse(localStorage.getItem('kids_center_passwords') || '{}');
+        delete localAccounts[cleanEmail];
+        localStorage.setItem('kids_center_passwords', JSON.stringify(localAccounts));
+      } catch {}
 
       saveUser(remoteUser);
       setIsAuthModalOpen(false);
