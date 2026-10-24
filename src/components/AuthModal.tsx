@@ -25,12 +25,13 @@ export const AuthModal: React.FC = () => {
 
   if (!isAuthModalOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     sounds.playKeyClick();
-    const res = login(email, password);
+    setMsg({ text: 'Signing in...', error: false });
+    const res = await login(email, password);
     setMsg({ text: res.message, error: !res.success });
-    if (res.success) {
+    if (res.success && !res.message.toLowerCase().includes('check your email')) {
       setTimeout(() => {
         setMsg(null);
         closeAuthModal();
@@ -38,12 +39,13 @@ export const AuthModal: React.FC = () => {
     }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     sounds.playKeyClick();
-    const res = register(email, password, nickname);
+    setMsg({ text: 'Creating account...', error: false });
+    const res = await register(email, password, nickname);
     setMsg({ text: res.message, error: !res.success });
-    if (res.success) {
+    if (res.success && !res.message.toLowerCase().includes('check your email')) {
       setTimeout(() => {
         setMsg(null);
         closeAuthModal();
@@ -188,6 +190,7 @@ export const AuthModal: React.FC = () => {
                   <input
                     type="password"
                     required
+                    minLength={6}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
@@ -237,7 +240,7 @@ export const AuthModal: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-black uppercase text-neutral-700 mb-1">
-                  Create Password (min 4 chars)
+                  Create Password (min 6 chars)
                 </label>
                 <input
                   type="password"
