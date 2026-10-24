@@ -123,7 +123,7 @@ const INITIAL_STUDENTS: StudentRosterRecord[] = [
 ];
 
 
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\\/+$/, '');
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const SESSION_STORAGE_KEY = 'kids_center_supabase_session';
 
