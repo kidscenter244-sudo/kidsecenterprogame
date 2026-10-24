@@ -245,6 +245,7 @@ export const AuthModal: React.FC = () => {
                 <input
                   type="password"
                   required
+                  minLength={6}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
