@@ -338,56 +338,111 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !pass) return { success: false, message: 'Please enter both email and password.' };
+
+    const applyLegacyProgress = async (remoteUser: UserAccount, authSession: SupabaseSession, legacyUser?: UserAccount) => {
+      if (legacyUser && legacyUser.email === cleanEmail) {
+        remoteUser.coins = Math.max(remoteUser.coins, Number(legacyUser.coins || 0));
+        remoteUser.stats.totalSolved = Math.max(remoteUser.stats.totalSolved, Number(legacyUser.stats?.totalSolved || 0));
+        remoteUser.stats.totalCorrect = Math.max(remoteUser.stats.totalCorrect, Number(legacyUser.stats?.totalCorrect || 0));
+        remoteUser.stats.bestStreak = Math.max(remoteUser.stats.bestStreak, Number(legacyUser.stats?.bestStreak || 0));
+        remoteUser.unlockedCharacters = Array.from(new Set([
+          ...remoteUser.unlockedCharacters,
+          ...(legacyUser.unlockedCharacters || [])
+        ]));
+        remoteUser.equippedCharacterId = legacyUser.equippedCharacterId || remoteUser.equippedCharacterId;
+        remoteUser.history = remoteUser.history.length ? remoteUser.history : (legacyUser.history || []);
+        await databaseRequest(`profiles?id=eq.${encodeURIComponent(authSession.user.id)}`, authSession.access_token, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            coins: remoteUser.coins,
+            total_solved: remoteUser.stats.totalSolved,
+            total_correct: remoteUser.stats.totalCorrect,
+            best_streak: remoteUser.stats.bestStreak,
+            equipped_character_id: remoteUser.equippedCharacterId,
+            updated_at: new Date().toISOString()
+          })
+        });
+        for (const characterId of remoteUser.unlockedCharacters) {
+          await databaseRequest('user_characters', authSession.access_token, {
+            method: 'POST',
+            headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+            body: JSON.stringify({ user_id: authSession.user.id, character_id: characterId })
+          }).catch(() => undefined);
+        }
+      }
+    };
+
     try {
-      const result = await authRequest('token?grant_type=password', { email: cleanEmail, password: pass });
+      let result: any;
+      let wasMigrated = false;
+      try {
+        result = await authRequest('token?grant_type=password', { email: cleanEmail, password: pass });
+      } catch (loginError) {
+        // Older versions stored accounts only in this browser. If that exact local password matches,
+        // create the corresponding Supabase Auth account and migrate its saved progress.
+        let localAccounts: Record<string, string> = {};
+        try {
+          localAccounts = JSON.parse(localStorage.getItem('kids_center_passwords') || '{}');
+        } catch {}
+        if (localAccounts[cleanEmail] !== pass) throw loginError;
+
+        const legacyRaw = localStorage.getItem(`kids_center_user_${cleanEmail}`);
+        const legacyUser = legacyRaw ? JSON.parse(legacyRaw) as UserAccount : {
+          email: cleanEmail,
+          nickname: cleanEmail.split('@')[0],
+          role: 'student' as const,
+          coins: 450,
+          unlockedCharacters: ['rookie-champ'],
+          equippedCharacterId: 'rookie-champ',
+          stats: { totalSolved: 0, totalCorrect: 0, totalCoinsEarned: 450, bestStreak: 0 },
+          history: []
+        };
+        result = await authRequest('signup', {
+          email: cleanEmail,
+          password: pass,
+          data: { nickname: legacyUser.nickname || cleanEmail.split('@')[0], role: 'student' }
+        });
+        if (!result.access_token || !result.user) {
+          return { success: true, message: 'Account created. Check your email to confirm it, then sign in.' };
+        }
+        wasMigrated = true;
+      }
+
       if (!result.access_token || !result.user) {
         return { success: false, message: 'Supabase did not return a signed-in session. Check your email confirmation settings.' };
       }
-      const session = result as SupabaseSession;
-      saveSessionToken(session);
-      const remoteUser = await loadRemoteProfile(session.user, session.access_token);
+      const authSession = result as SupabaseSession;
+      saveSessionToken(authSession);
+      const remoteUser = await loadRemoteProfile(authSession.user, authSession.access_token);
 
-      // Preserve local progress from this browser when an existing local account is first linked.
+      let legacyUser: UserAccount | undefined;
       try {
-        const localRaw = localStorage.getItem(`kids_center_user_${cleanEmail}`);
-        if (localRaw) {
-          const localUser = JSON.parse(localRaw) as UserAccount;
-          if (localUser.email === cleanEmail) {
-            remoteUser.coins = Math.max(remoteUser.coins, Number(localUser.coins || 0));
-            remoteUser.stats.totalSolved = Math.max(remoteUser.stats.totalSolved, Number(localUser.stats.totalSolved || 0));
-            remoteUser.stats.totalCorrect = Math.max(remoteUser.stats.totalCorrect, Number(localUser.stats.totalCorrect || 0));
-            remoteUser.stats.bestStreak = Math.max(remoteUser.stats.bestStreak, Number(localUser.stats.bestStreak || 0));
-            remoteUser.unlockedCharacters = Array.from(new Set([...remoteUser.unlockedCharacters, ...(localUser.unlockedCharacters || [])]));
-            remoteUser.equippedCharacterId = localUser.equippedCharacterId || remoteUser.equippedCharacterId;
-            remoteUser.history = remoteUser.history.length ? remoteUser.history : (localUser.history || []);
-            await databaseRequest(`profiles?id=eq.${encodeURIComponent(session.user.id)}`, session.access_token, {
-              method: 'PATCH',
-              headers: { Prefer: 'return=minimal' },
-              body: JSON.stringify({
-                coins: remoteUser.coins,
-                total_solved: remoteUser.stats.totalSolved,
-                total_correct: remoteUser.stats.totalCorrect,
-                best_streak: remoteUser.stats.bestStreak,
-                equipped_character_id: remoteUser.equippedCharacterId,
-                updated_at: new Date().toISOString()
-              })
-            });
-            for (const characterId of remoteUser.unlockedCharacters) {
-              await databaseRequest('user_characters', session.access_token, {
-                method: 'POST',
-                headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-                body: JSON.stringify({ user_id: session.user.id, character_id: characterId })
-              }).catch(() => undefined);
-            }
-          }
-        }
+        const raw = localStorage.getItem(`kids_center_user_${cleanEmail}`);
+        if (raw) legacyUser = JSON.parse(raw) as UserAccount;
+      } catch {}
+      try {
+        await applyLegacyProgress(remoteUser, authSession, legacyUser);
       } catch (migrationError) {
         console.warn('Could not migrate local progress:', migrationError);
       }
 
+      if (wasMigrated) {
+        try {
+          const localAccounts: Record<string, string> = JSON.parse(localStorage.getItem('kids_center_passwords') || '{}');
+          delete localAccounts[cleanEmail];
+          localStorage.setItem('kids_center_passwords', JSON.stringify(localAccounts));
+        } catch {}
+      }
+
       saveUser(remoteUser);
       setIsAuthModalOpen(false);
-      return { success: true, message: `Welcome back, ${remoteUser.nickname}!` };
+      return {
+        success: true,
+        message: wasMigrated
+          ? `Your account and saved progress have been connected to Supabase, ${remoteUser.nickname}!`
+          : `Welcome back, ${remoteUser.nickname}!`
+      };
     } catch (error) {
       saveSessionToken(null);
       return { success: false, message: error instanceof Error ? error.message : 'Login failed.' };
