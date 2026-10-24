@@ -530,21 +530,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveUser(updated);
     const session = getSavedSession();
     if (session?.access_token) {
-      void databaseRequest('rpc/record_quiz_and_update_stats', session.access_token, {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          p_user_id: session.user.id,
-          p_category: quizSession.categoryTitle,
-          p_total: quizSession.totalQuestions,
-          p_correct: quizSession.correctAnswers,
-          p_coins: quizSession.coinsEarned,
-          p_time_spent: quizSession.timeSpentSeconds
+      const accuracy = quizSession.totalQuestions > 0
+        ? Math.round((quizSession.correctAnswers / quizSession.totalQuestions) * 100)
+        : 0;
+      void Promise.all([
+        databaseRequest('quiz_sessions', session.access_token, {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            user_id: session.user.id,
+            category_title: quizSession.categoryTitle,
+            total_questions: quizSession.totalQuestions,
+            correct_answers: quizSession.correctAnswers,
+            accuracy,
+            coins_earned: quizSession.coinsEarned,
+            time_spent_seconds: quizSession.timeSpentSeconds
+          })
+        }),
+        databaseRequest(`profiles?id=eq.${encodeURIComponent(session.user.id)}`, session.access_token, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            coins: updated.coins,
+            total_solved: updated.stats.totalSolved,
+            total_correct: updated.stats.totalCorrect,
+            best_streak: updated.stats.bestStreak,
+            updated_at: new Date().toISOString(),
+            last_active: new Date().toISOString()
+          })
         })
-      }).then(async () => {
-        const fresh = await loadRemoteProfile(session.user, session.access_token);
-        saveUser({ ...fresh, history: [quizSession, ...fresh.history.filter(item => item.id !== quizSession.id)].slice(0, 20) });
-      }).catch(error => console.error('Could not save quiz session to Supabase:', error));
+      ]).catch(error => console.error('Could not save quiz session to Supabase:', error));
     }
   };
 
